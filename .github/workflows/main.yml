@@ -1,79 +1,93 @@
-name: CI
+name: "CodeQL"
 
-on: [push]
+on:
+  workflow_dispatch:
+  # push:
+  #   branches: [ "master" ]
+  # pull_request:
+  #   branches: [ "master" ]
+  # schedule:
+  #   - cron: '31 5 * * 2'
 
 jobs:
-  build:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ${{ 'windows-latest' }}
+    timeout-minutes: ${{ 360 }}
+    permissions:
+      # required for all workflows
+      security-events: write
 
-    runs-on: ${{ matrix.os }}
+      # required to fetch internal or private CodeQL packs
+      packages: read
+
+      # only required for workflows in private repositories
+      actions: read
+      contents: read
 
     strategy:
+      fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        include:
+        - language: java-kotlin
+          build-mode: none # This mode only analyzes Java. Set this to 'autobuild' or 'manual' to analyze Kotlin too.
 
     steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
-      - name: Checkout repository
-        uses: actions/checkout@v2
+    - name: Install 7-Zip
+      run: |
+        choco install 7zip.install -y
+        echo "C:\Program Files\7-Zip" >> $env:GITHUB_PATH
 
-      - name: Setup Maven caching
-        uses: actions/cache@v2
-        with:
-          path: ~/.m2/repository
-          key: ${{ runner.os }}-maven-${{ hashFiles('**/pom.xml') }}
-          restore-keys: |
-            ${{ runner.os }}-maven-
+    # - name: Set up JDK 1.8
+    #   uses: actions/setup-java@v4
+    #   with:
+    #     distribution: "Liberica"
+    #     java-version: 1.8
+    #     java-package: jdk+fx
+    #     architecture: x64
 
-      - name: Setup JDK 11
-        uses: actions/setup-java@v1
-        with:
-          java-version: 11
-          java-package: jdk
-          architecture: x64
+    # Initializes the CodeQL tools for scanning.
+    - name: Initialize CodeQL
+      uses: github/codeql-action/init@v3
+      with:
+        languages: ${{ matrix.language }}
+        build-mode: ${{ matrix.build-mode }}
 
-      - name: Setup JDK 8
-        uses: actions/setup-java@v1
-        with:
-          java-version: 8
-          java-package: jdk
-          architecture: x64
+    - name: Perform CodeQL Analysis
+      uses: github/codeql-action/analyze@v3
+      with:
+        category: "/language:${{matrix.language}}"
 
-      - name: Inspect environment (Linux)
-        if: runner.os == 'Linux'
-        run: env | grep '^JAVA'
+    - name: Upload a Build Artifact
+      id: upload-build-artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: java-queries-builtin.qls
+        path: D:\a\_temp\codeql_databases\java.zip
 
-      - name: Build with Maven (Linux)
-        if: runner.os == 'Linux'
-        continue-on-error: true
-        run: ./mvnw -V -B --no-transfer-progress -e -DtrimStackTrace=false -Dmaven.test.failure.ignore=true -Dsurefire.rerunFailingTestsCount=1 --global-toolchains .github/workflows/maven-toolchains.xml verify
+    - name: Package CodeQL directory
+      run: |
+        7z a C:\CodeQL.7z C:\hostedtoolcache\windows\CodeQL
 
-      - name: Inspect environment (Windows)
-        if: runner.os == 'Windows'
-        run: set java
+    - name: Upload a CodeQL Runtime Artifact
+      id: upload-CodeQL-Runtime-artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: CodeQL-Runtime
+        path: C:\CodeQL.7z
+        # path: C:\hostedtoolcache\windows\CodeQL
 
-      - name: Build with Maven (Windows)
-        if: runner.os == 'Windows'
-        continue-on-error: true
-        run: ./mvnw -V -B --no-transfer-progress -e "-DtrimStackTrace=false" "-Dmaven.test.failure.ignore=true" "-Dsurefire.rerunFailingTestsCount=1" "-Dlog4j2.junit.fileCleanerSleepPeriodMillis=1000" --global-toolchains ".github\workflows\maven-toolchains.xml" verify
-
-      - name: Inspect environment (MacOS)
-        if: runner.os == 'macOS'
-        run: env | grep '^JAVA'
-
-      - name: Build with Maven (MacOS)
-        if: runner.os == 'macOS'
-        continue-on-error: true
-        run: ./mvnw -V -B --no-transfer-progress -e -DtrimStackTrace=false -Dmaven.test.failure.ignore=true -Dsurefire.rerunFailingTestsCount=1 --global-toolchains .github/workflows/maven-toolchains.xml verify
-
-      - name: Publish Test Results
-        uses: scacap/action-surefire-report@v1
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          check_name: Test Report (${{ matrix.os }})
-          report_paths: '**/*-reports/TEST-*.xml'
-
-      - name: Upload Test Reports
-        uses: actions/upload-artifact@v2
-        with:
-          name: test-reports-${{ matrix.os }}
-          path: '**/*-reports'
+    # - name: Upload a Build Artifact
+    #   id: upload-build-artifact
+    #   uses: actions/upload-artifact@v4
+    #   with:
+    #     # Artifact name
+    #     name: # optional, default is artifact
+    #       java-queries-builtin.qls
+    #     # A file, directory or wildcard pattern that describes what to upload
+    #     path:
+    #       D:\a\_temp\codeql_databases\java.zip
+    #     # The desired behavior if no files are found using the provided path.
